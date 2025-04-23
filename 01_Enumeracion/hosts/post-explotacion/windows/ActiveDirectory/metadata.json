@@ -1,0 +1,13 @@
+{
+    "name": "Enumeración AD (.NET + PowerView)",
+    "path": "01_Enumeracion/hosts/post-explotacion/windows/ActiveDirectory/ADEnum.ps1",
+    "description": "Script modular para enumerar AD con .NET y PowerView si está presente.",
+    "tags": ["post-explotacion", "windows", "active directory", "enumeracion"],
+    "type": "powershell",
+    "commands": [
+        "powershell -ExecutionPolicy Bypass -File ADEnum.ps1 -Help",
+        "Enum-ADUsers -ExpandGroups -HighlightCritical",
+        "Enum-ADCritical",
+        "Enum-ADObjectPermissions -TargetName 'jdoe'"
+    ]
+}
