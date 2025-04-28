@@ -15,13 +15,18 @@ if ($Help) {
     Write-Host "`n[?] Uso del script ADEnum-Extended.ps1:" -ForegroundColor Cyan
     Write-Host @"
 Comandos disponibles:
-  Enum-ADUsers [-ExpandGroups] [-HighlightCritical]     → Enumera usuarios
-  Enum-ADGroups [-ExpandUsers] [-HighlightCritical]     → Enumera grupos
-  Enum-ADCritical                                        → Enumera objetos críticos
-  Enum-ADRelationships                                   → Enumera relaciones usuario ↔ grupo
-  Get-GroupUserChain -GroupName "Admins"                → Cadena de pertenencia recursiva
-  Enum-ADUserDeepRecon -UserName "jdoe"                 → Análisis profundo de un usuario (requiere PowerView)
-  Enum-ADObjectPermissions -TargetName "jdoe"           → Enumera ACLs y privilegios sobre un objeto AD
+  Enum-ADUsers [-ExpandGroups] [-HighlightCritical]     + Enumera usuarios
+  Enum-ADGroups [-ExpandUsers] [-HighlightCritical]     + Enumera grupos
+  Enum-ADCritical                                       + Enumera objetos criticos
+  Enum-ADRelationships                                  + Enumera relaciones usuario ↔ grupo
+  Get-GroupUserChain -GroupName "Admins"                + Cadena de pertenencia recursiva
+  Enum-ADUserDeepRecon -UserName "jdoe"                 + Analisis profundo de un usuario (requiere PowerView)
+  Enum-ADObjectPermissions -TargetName "jdoe"           + Enumera ACLs y privilegios sobre un objeto AD
+  Find-ADComputerByName -Name "hostname"                + Enumera computadoras por nombre 
+  Get-ASREP-RoastableUsers
+  Get-KerberoastableUsers
+  Test-DCSyncPermissions
+  Get-UserHostAssociation -UserName "juanito"           + Muestra hostnames asociados al usuario
 "@
     return
 }
@@ -111,6 +116,7 @@ function Invoke-LDAPQuery {
     }
 }
 
+# ============ Enumera Usuarios ===============
 function Enum-ADUsers {
     param (
         [switch]$ExpandGroups,
@@ -118,6 +124,8 @@ function Enum-ADUsers {
     )
     Invoke-LDAPQuery -LDAPFilter "(&(objectCategory=person)(objectClass=user))" -ExpandRelationships:$ExpandGroups -HighlightCritical:$HighlightCritical
 }
+
+# ============= Enumera Grupos ================
 
 function Enum-ADGroups {
     param (
@@ -127,10 +135,13 @@ function Enum-ADGroups {
     Invoke-LDAPQuery -LDAPFilter "(objectClass=group)" -ExpandRelationships:$ExpandUsers -HighlightCritical:$HighlightCritical
 }
 
+# ============= Enumera permisos criticos y relaciones ===============
 function Enum-ADCritical {
     Enum-ADUsers -ExpandGroups -HighlightCritical
     Enum-ADGroups -ExpandUsers -HighlightCritical
 }
+
+# ============= Enumera relaciones ================
 
 function Enum-ADRelationships {
     Write-Host "\nRelaciones Usuario → Grupos:`n" -ForegroundColor Magenta
@@ -139,6 +150,8 @@ function Enum-ADRelationships {
     Write-Host "\nRelaciones Grupo → Miembros:`n" -ForegroundColor Magenta
     Invoke-LDAPQuery -LDAPFilter "(objectClass=group)" -ExpandRelationships
 }
+
+# ============= Enumera grupos/usuarios en cadena ===========
 
 function Get-GroupUserChain {
     param (
@@ -248,6 +261,8 @@ function Enum-ADUserDeepRecon {
     $results | Format-Table -AutoSize
 }
 
+# ========= Enumera permisos ==============
+
 function Enum-ADObjectPermissions {
     param(
         [string]$TargetName
@@ -310,6 +325,137 @@ function Enum-ADObjectPermissions {
     }
 }
 
+
+# =================== Funcion buscar computadora por nombre ===================
+function Find-ADComputerByName {
+    param (
+        [Parameter(Mandatory)]
+        [string]$ComputerName
+    )
+
+    Write-Host "[*] Buscando host con nombre '$ComputerName' en el dominio..." -ForegroundColor Cyan
+
+    try {
+        $searcher = New-Object System.DirectoryServices.DirectorySearcher
+        $searcher.Filter = "(&(objectClass=computer)(name=$ComputerName))"
+        $searcher.PropertiesToLoad.AddRange(@("name", "description", "dNSHostName")) | Out-Null
+
+        $result = $searcher.FindOne()
+
+        if ($result -eq $null) {
+            Write-Warning "[-] Equipo '$ComputerName' no encontrado en el dominio."
+            return
+        }
+
+        $name        = $result.Properties["name"][0]
+        $description = $result.Properties["description"][0]
+        $dnsName     = $result.Properties["dnshostname"][0]
+
+        # Resolver IP (si es posible)
+        try {
+            $ip = [System.Net.Dns]::GetHostAddresses($dnsName) | Where-Object { $_.AddressFamily -eq "InterNetwork" } | Select-Object -First 1
+        } catch {
+            $ip = "No resuelta"
+        }
+
+        [PSCustomObject]@{
+            Nombre      = $name
+            Descripcion = $description
+            DNSHostName = $dnsName
+            DireccionIP = $ip.IPAddressToString
+        } | Format-Table -AutoSize
+
+    } catch {
+        Write-Error "Error al buscar el equipo: $_"
+    }
+}
+
+
+# =================== Funciones para vectores ====================
+
+function Detect-KerberoastableUsers {
+    Get-ADUser -Filter {ServicePrincipalName -ne "$null" -and Enabled -eq $true} -Properties ServicePrincipalName,UserAccountControl | ForEach-Object {
+        if (-not ($_.UserAccountControl -band 0x2)) {
+            Write-Host "[*] Usuario Kerberoasteable encontrado: $($_.SamAccountName)" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Detect-ASREPUsers {
+    Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true -and Enabled -eq $true} -Properties SamAccountName | ForEach-Object {
+        Write-Host "[*] Usuario AS-REP Roasteable encontrado: $($_.SamAccountName)" -ForegroundColor Cyan
+    }
+}
+
+function Detect-DCSyncUsers {
+    $domain = (Get-ADDomain).DistinguishedName
+    $acl = Get-Acl "AD:\\$domain"
+    $dcSyncRights = @(
+        'DS-Replication-Get-Changes',
+        'DS-Replication-Get-Changes-All'
+    )
+
+    foreach ($ace in $acl.Access) {
+        foreach ($right in $dcSyncRights) {
+            if ($ace.ActiveDirectoryRights.ToString() -match $right -and $ace.AccessControlType -eq "Allow") {
+                try {
+                    $sid = New-Object System.Security.Principal.SecurityIdentifier($ace.IdentityReference.Value)
+                    $user = $sid.Translate([System.Security.Principal.NTAccount])
+                } catch {
+                    $user = $ace.IdentityReference
+                }
+                Write-Host "[*] DCSync posible: $user en $domain con derecho $right" -ForegroundColor Magenta
+            }
+        }
+    }
+}
+
+
+# ============= Función para asociar usuario con hostname ====================
+
+function Get-UserHostAssociation {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$UserName
+    )
+
+    if (-not $PowerViewAvailable) {
+        Write-Warning "PowerView no está disponible. No se puede continuar."
+        return
+    }
+
+    Write-Host "[*] Buscando sesiones activas asociadas al usuario: $UserName" -ForegroundColor Cyan
+
+    try {
+        $computers = Get-DomainComputer | Select-Object -ExpandProperty Name
+    } catch {
+        Write-Warning "No se pudo obtener la lista de computadoras del dominio: $_"
+        return
+    }
+
+    $associatedHosts = @()
+
+    foreach ($computer in $computers) {
+        try {
+            $sessions = Get-NetSession -ComputerName $computer -ErrorAction Stop
+            foreach ($session in $sessions) {
+                if ($session.UserName -like "*$UserName*") {
+                    $associatedHosts += $computer
+                    break
+                }
+            }
+        } catch {
+            # Silenciar errores como "RPC Server unavailable", etc.
+        }
+    }
+
+    if ($associatedHosts.Count -gt 0) {
+        Write-Host "[+] El usuario $UserName tiene sesiones en las siguientes máquinas:" -ForegroundColor Green
+        $associatedHosts | Sort-Object | Get-Unique | ForEach-Object { Write-Host " - $_" -ForegroundColor Yellow }
+    } else {
+        Write-Host "[-] No se encontraron sesiones activas del usuario $UserName." -ForegroundColor DarkGray
+    }
+}
 
 
 # =================== Mensaje de carga ==========================

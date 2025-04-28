@@ -1,0 +1,17 @@
+{
+  "name": "Invoke-LM",
+  "filename": "Invoke-LM.ps1",
+  "description": "Movimiento lateral en Windows mediante DCOM/CIM usando credenciales válidas. Ejecuta payloads codificados en Base64.",
+  "author": "usuario",
+  "version": "1.0",
+  "tags": ["powershell", "lateral movement", "post-exploitation", "WMI", "CIM", "DCOM", "base64", "reverse shell"],
+  "usage": "Invoke-LM -TargetIP <IP> -Username <usuario> -Password <clave> -PayloadBase64 <base64_payload>",
+  "requires": [
+    "PowerShell >= 5.0",
+    "Credenciales válidas en el sistema remoto",
+    "Puerto de escucha activo en el atacante"
+  ],
+  "platform": "Windows",
+  "language": "PowerShell",
+  "category": "Post-Exploitation"
+}

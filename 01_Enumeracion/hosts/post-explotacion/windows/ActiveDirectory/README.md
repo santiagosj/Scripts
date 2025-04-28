@@ -15,6 +15,7 @@ Este script integral te permite realizar:
 - **Get-GroupUserChain**: Cadena de pertenencia recursiva de un grupo.
 - **Enum-ADUserDeepRecon**: Reconocimiento profundo de un usuario (PowerView).
 - **Enum-ADObjectPermissions**: Enumeración de ACLs y privilegios sobre un objeto AD.
+- **Find-ADComputerByName**: Enumera computadoras por nombre.
 - **Funciones adicionales**: Operaciones avanzadas como exportar datos, explorar OU, dominios de confianza, permisos, etc.
 
 ---
@@ -113,7 +114,10 @@ Este script integral te permite realizar:
     - **Responsabilidad:** Exporta datos de AD a CSV.
     - **Uso:** `Export-ADDataToCSV -DataType "Users" -FilePath "C:\ruta\archivo.csv"`
     - **Descripción:** Genera archivo CSV con información extraída para documentación.
-
+12. ### Find-ADComputerByName
+    - **Responsabilidad:** Obtiener datos por hostnombre.
+    - **Uso:** `Find-ADComputerByName -ComputerName "web04"`
+    - **Descripción:** Obtiene datos de una computadora por hostname.
 ---
 
 ## 🛠 Cómo usar
